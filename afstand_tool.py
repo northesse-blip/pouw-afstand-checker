@@ -1,19 +1,18 @@
 import math
-import time
 import requests
 import streamlit as st
 
 st.set_page_config(page_title="Afstand checker (woonplaats)", page_icon="🚌", layout="centered")
 
-# --- Vaste locaties (Pouw) ---
-# Tip: als een adres niet gevonden wordt, voeg postcode/plaats toe.
-LOCATIONS = {
-    "Vianen – Hagenweg 3c": "Hagenweg 3c, 4131 LX Vianen, Netherlands",
-    "Amersfoort – De Stuwdam 5": "De Stuwdam 5, 3825 KP Amersfoort, Netherlands",
-    "Woerden – Botnische Golf 24": "Botnische Golf 24, Woerden, Netherlands",
+# --- Vaste locaties als coördinaten (lat, lon) ---
+# Deze staan nu op "plaatsniveau" (centrum). Werkt direct en is stabiel.
+# Wil je ze exact? Vervang dan de lat/lon met de coördinaten van jullie pand.
+LOCATIONS_LL = {
+    "Vianen – Hagenweg 3c": (51.9919, 5.0912),
+    "Amersfoort – De Stuwdam 5": (52.1561, 5.3878),
+    "Woerden – Botnische Golf 24": (52.0867, 4.8833),
 }
 
-# --- Helpers ---
 def haversine_km(lat1, lon1, lat2, lon2) -> float:
     """Hemelsbrede afstand in km."""
     R = 6371.0
@@ -24,14 +23,14 @@ def haversine_km(lat1, lon1, lat2, lon2) -> float:
     return 2 * R * math.asin(math.sqrt(h))
 
 @st.cache_data(show_spinner=False)
-def geocode(address: str):
+def geocode_city(query: str):
     """
-    Geocode via OpenStreetMap Nominatim.
-    Let op: dit stuurt de woonplaats/postcode (geen naam) naar Nominatim om coords op te halen.
+    Geocode woonplaats/postcode via OpenStreetMap Nominatim.
+    We sturen alleen woonplaats/postcode (anoniem).
     """
     url = "https://nominatim.openstreetmap.org/search"
     params = {
-        "q": address,
+        "q": query,
         "format": "json",
         "limit": 1,
         "countrycodes": "nl",
@@ -45,21 +44,6 @@ def geocode(address: str):
         return None
     return float(data[0]["lat"]), float(data[0]["lon"])
 
-@st.cache_data(show_spinner=False)
-def geocode_locations():
-    """Geocode vaste locaties. Geeft ook terug welke locaties (nog) niet gevonden worden."""
-    loc_ll = {}
-    failures = []
-    for name, addr in LOCATIONS.items():
-        ll = geocode(addr)
-        time.sleep(1.0)  # beleefd richting Nominatim
-        if ll is None:
-            failures.append((name, addr))
-        else:
-            loc_ll[name] = ll
-    return loc_ll, failures
-
-# --- UI ---
 st.title("🚌 Afstand checker (woonplaats → 3 locaties)")
 st.caption("Anoniem: je voert alleen woonplaats (optioneel postcode) in. Deze app slaat niets op.")
 
@@ -75,21 +59,11 @@ if st.button("Bereken afstanden"):
         st.warning("Vul minimaal een woonplaats in (postcode is optioneel).")
         st.stop()
 
+    # Kandidatenquery: postcode + plaats is het meest nauwkeurig
     query = ", ".join([p for p in [postcode.strip(), plaats.strip(), "Netherlands"] if p])
 
     with st.spinner("Even rekenen..."):
-        cand_ll = geocode(query)
-        loc_ll, failures = geocode_locations()
-
-    if failures:
-        st.error("Ik kan (nog) niet alle vaste locaties vinden bij OpenStreetMap.")
-        for name, addr in failures:
-            st.write(f"❌ **{name}** — {addr}")
-        st.info(
-            "Oplossing: controleer de spelling van het adres, of voeg postcode/plaats toe in LOCATIONS. "
-            "Als je wilt, kan je ook vaste coördinaten (lat/lon) gebruiken zodat dit nooit meer fout gaat."
-        )
-        st.stop()
+        cand_ll = geocode_city(query)
 
     if cand_ll is None:
         st.error("Ik kon deze woonplaats/postcode niet vinden. Probeer alleen woonplaats, of voeg postcode toe.")
@@ -98,7 +72,7 @@ if st.button("Bereken afstanden"):
     clat, clon = cand_ll
 
     results = []
-    for name, (lat, lon) in loc_ll.items():
+    for name, (lat, lon) in LOCATIONS_LL.items():
         km = haversine_km(clat, clon, lat, lon)
         results.append((name, km))
 
